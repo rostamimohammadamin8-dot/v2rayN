@@ -1,0 +1,127 @@
+name: Build portable Windows client
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Provision Xray, sing-box, and GeoLite2 assets
+        env:
+          XRAY_WINDOWS_ARCHIVE_URL: ${{ vars.XRAY_WINDOWS_ARCHIVE_URL }}
+          XRAY_WINDOWS_ARCHIVE_SHA256: ${{ vars.XRAY_WINDOWS_ARCHIVE_SHA256 }}
+          SING_BOX_WINDOWS_ARCHIVE_URL: ${{ vars.SING_BOX_WINDOWS_ARCHIVE_URL }}
+          SING_BOX_WINDOWS_ARCHIVE_SHA256: ${{ vars.SING_BOX_WINDOWS_ARCHIVE_SHA256 }}
+          MAXMIND_LICENSE_KEY: ${{ secrets.MAXMIND_LICENSE_KEY }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archives = @(
+            @{
+              Name = 'Xray'
+              Executable = 'xray.exe'
+              Destination = 'bin/Xray'
+              Url = $env:XRAY_WINDOWS_ARCHIVE_URL
+              Sha256 = $env:XRAY_WINDOWS_ARCHIVE_SHA256
+            },
+            @{
+              Name = 'sing-box'
+              Executable = 'sing-box.exe'
+              Destination = 'bin/sing_box'
+              Url = $env:SING_BOX_WINDOWS_ARCHIVE_URL
+              Sha256 = $env:SING_BOX_WINDOWS_ARCHIVE_SHA256
+            }
+          )
+
+          foreach ($asset in $archives) {
+            $uri = $null
+            if (-not [Uri]::TryCreate($asset.Url, [UriKind]::Absolute, [ref]$uri) -or
+                $uri.Scheme -ne 'https' -or
+                $uri.Host -notin @('github.com', 'release-assets.githubusercontent.com')) {
+              throw "Set the repository variable for the official GitHub $($asset.Name) Windows ZIP archive."
+            }
+            if ($asset.Sha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+              throw "Set the SHA-256 repository variable for the $($asset.Name) archive."
+            }
+
+            $temporaryDirectory = Join-Path $env:RUNNER_TEMP $asset.Name
+            $archivePath = Join-Path $env:RUNNER_TEMP "$($asset.Name).zip"
+            Invoke-WebRequest -Uri $uri -OutFile $archivePath
+            $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+            if ($actualHash -ne $asset.Sha256.ToUpperInvariant()) {
+              throw "The downloaded $($asset.Name) archive failed its SHA-256 integrity check."
+            }
+            Expand-Archive -LiteralPath $archivePath -DestinationPath $temporaryDirectory -Force
+            $executable = Get-ChildItem -LiteralPath $temporaryDirectory -Filter $asset.Executable -File -Recurse |
+              Select-Object -First 1
+            if ($null -eq $executable) {
+              throw "The configured $($asset.Name) ZIP did not contain $($asset.Executable)."
+            }
+            New-Item -ItemType Directory -Force -Path $asset.Destination | Out-Null
+            Copy-Item -Path (Join-Path $executable.Directory.FullName '*') -Destination $asset.Destination -Recurse
+          }
+
+          if (-not (Test-Path -LiteralPath 'dat/GeoLite2-Country.mmdb')) {
+            if ([string]::IsNullOrWhiteSpace($env:MAXMIND_LICENSE_KEY)) {
+              throw 'Set MAXMIND_LICENSE_KEY to download the licensed GeoLite2 database, or provision dat/GeoLite2-Country.mmdb before the workflow.'
+            }
+            $downloadUri = "https://download.maxmind.com/geoip/databases/GeoLite2-Country/download?suffix=mmdb&license_key=$env:MAXMIND_LICENSE_KEY"
+            New-Item -ItemType Directory -Force -Path dat | Out-Null
+            Invoke-WebRequest -Uri $downloadUri -OutFile 'dat/GeoLite2-Country.mmdb'
+          }
+          if ((Get-Item -LiteralPath 'dat/GeoLite2-Country.mmdb').Length -lt 1000000) {
+            throw 'The GeoLite2 Country database download is unexpectedly small.'
+          }
+
+      - name: Publish self-contained v2rayN
+        run: >-
+          dotnet publish v2rayN/v2rayN/v2rayN.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o publish
+
+      - name: Assemble portable archive
+        shell: pwsh
+        run: |
+          $required = @(
+            'bin/Xray',
+            'bin/sing_box',
+            'dat/GeoLite2-Country.mmdb'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Required runtime asset is missing: $path. See the portable-release setup in README.md."
+            }
+          }
+
+          New-Item -ItemType Directory -Force -Path publish/bin, publish/dat | Out-Null
+          Copy-Item -Path bin/Xray -Destination publish/bin -Recurse
+          Copy-Item -Path bin/sing_box -Destination publish/bin -Recurse
+          Copy-Item -LiteralPath dat/GeoLite2-Country.mmdb -Destination publish/dat
+
+          $archive = "v2rayN-$env:GITHUB_REF_NAME-win-x64-portable.zip"
+          Compress-Archive -Path publish/* -DestinationPath $archive -CompressionLevel Optimal
+          "RELEASE_ARCHIVE=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: ${{ env.RELEASE_ARCHIVE }}

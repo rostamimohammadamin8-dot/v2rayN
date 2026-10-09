@@ -1,5 +1,6 @@
 using v2rayN.Manager;
 using v2rayN.Views;
+using v2rayN.CustomExtensions;
 
 namespace v2rayN;
 
@@ -21,7 +22,7 @@ public partial class App
     /// Open only one process
     /// </summary>
     /// <param name="e"></param>
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         var exePathKey = Utils.GetMd5(Utils.GetExePath());
 
@@ -44,6 +45,16 @@ public partial class App
         AppManager.Instance.WindowDialog = new WindowDialog();
 
         AppManager.Instance.InitComponents();
+
+        try
+        {
+            await CustomExtensionBootstrap.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("CustomExtensionBootstrap.Initialize", ex);
+            UI.Show($"The built-in subscription could not be initialized: {ex.Message}");
+        }
 
         RxAppBuilder.CreateReactiveUIBuilder()
             .WithWpf()

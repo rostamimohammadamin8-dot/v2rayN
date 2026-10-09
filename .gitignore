@@ -402,3 +402,8 @@ FodyWeavers.xsd
 # JetBrains Rider
 .idea/
 *.sln.iml
+
+# Licensed GeoLite2 data and local portable runtime binaries
+/dat/*.mmdb
+/bin/Xray/
+/bin/sing_box/

@@ -1,0 +1,118 @@
+name: Aggregate VPN subscriptions
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vpn-subscription-main
+  cancel-in-progress: false
+
+jobs:
+  aggregate:
+    if: github.repository == 'rostamimohammadamin8-dot/Free-VPN-Config-Pack-2026'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out subscription repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate, deduplicate, and encode public feeds
+        env:
+          VPN_SOURCE_URLS: ${{ vars.VPN_SOURCE_URLS }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sources = @($env:VPN_SOURCE_URLS -split "`r?`n" |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ })
+          if ($sources.Count -eq 0) {
+            throw 'Set the repository variable VPN_SOURCE_URLS to newline-separated HTTPS feed URLs.'
+          }
+
+          $protocols = '^(vless|vmess|trojan|ss|socks|http|hysteria2|tuic|anytls|wireguard)://'
+          $nodes = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          $client = [System.Net.Http.HttpClient]::new()
+          $client.Timeout = [TimeSpan]::FromSeconds(30)
+          try {
+            foreach ($source in $sources) {
+              $uri = $null
+              if (-not [Uri]::TryCreate($source, [UriKind]::Absolute, [ref]$uri) -or
+                  $uri.Scheme -ne 'https') {
+                throw 'Every feed URL must be an absolute HTTPS URL.'
+              }
+
+              try {
+                $response = $client.GetAsync($uri).GetAwaiter().GetResult()
+              } catch [System.Net.Http.HttpRequestException] {
+                throw 'Unable to retrieve a configured VPN source (network transport failure).'
+              }
+              try {
+                if ($null -eq $response.RequestMessage -or
+                    $null -eq $response.RequestMessage.RequestUri -or
+                    $response.RequestMessage.RequestUri.Scheme -ne 'https') {
+                  throw 'A configured VPN source redirected to a non-HTTPS URL.'
+                }
+                if (-not $response.IsSuccessStatusCode) {
+                  throw "A configured VPN source returned HTTP $([int]$response.StatusCode)."
+                }
+                $content = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              } finally {
+                $response.Dispose()
+              }
+              $lines = @($content -split '\r?\n' |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ })
+
+              if ($lines.Count -gt 0 -and -not ($lines | Where-Object { $_ -match $protocols })) {
+                try {
+                  $decoded = [Text.Encoding]::UTF8.GetString(
+                    [Convert]::FromBase64String(($content -replace '\s', '')))
+                  $lines = @($decoded -split '\r?\n' |
+                    ForEach-Object { $_.Trim() } |
+                    Where-Object { $_ })
+                } catch [FormatException] {
+                  throw 'A source returned neither proxy URIs nor valid Base64 content.'
+                }
+              }
+
+              $validCount = 0
+              foreach ($line in $lines) {
+                $nodeUri = $null
+                if ($line -match $protocols -and
+                    [Uri]::TryCreate($line, [UriKind]::Absolute, [ref]$nodeUri) -and
+                    -not [string]::IsNullOrWhiteSpace($nodeUri.Host)) {
+                  [void]$nodes.Add($line)
+                  $validCount++
+                }
+              }
+              if ($validCount -eq 0) {
+                throw 'A configured feed contained no supported proxy URI entries.'
+              }
+            }
+          } finally {
+            $client.Dispose()
+          }
+
+          $orderedNodes = @($nodes | Sort-Object)
+          $encoded = [Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes(($orderedNodes -join "`n")))
+          Set-Content -LiteralPath sub.txt -Value $encoded -NoNewline -Encoding ascii
+
+      - name: Commit updated subscription
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sub.txt
+          if git diff --cached --quiet; then
+            echo "Subscription is unchanged."
+            exit 0
+          fi
+          git commit -m "chore: update aggregated VPN subscription"
+          git push origin HEAD:main

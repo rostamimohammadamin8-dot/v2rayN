@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/CustomExtensions/">
+    <Project Path="CustomExtensions.Tests/CustomExtensions.Tests.csproj" />
+    <Project Path="CustomExtensions/CustomExtensions.csproj" />
+  </Folder>
   <Folder Name="/GitHub Action/">
     <File Path="../.github/workflows/build-all.yml" />
     <File Path="../.github/workflows/build-linux.yml" />

@@ -78,3 +78,29 @@ Telegram Group / Telegram 群组：
 Telegram Channel / Telegram 频道：
 
 [https://t.me/github_2dust](https://t.me/github_2dust)
+
+---
+
+## Portable extension modules
+
+The Windows client includes a separate `v2rayN/CustomExtensions` project. It targets `net8.0-windows` and the upstream client's `net10.0-windows10.0.19041.0` framework; the official upstream source, protocol models, parsers, and UI XAML remain intact. The application startup has a small additive bootstrap that stores the Free Config Pack subscription through v2rayN's existing SQLite table and schedules its initial update in the background. Existing tray/close-to-tray behavior is retained.
+
+The storage abstraction provides a relative-path JSON provider for legacy `guiNConfig.json` layouts and a callback-backed SQLite provider. The current .NET 10 client maps SQLite operations to its existing `SubItem` and `SQLiteHelper` APIs; no second database or parallel subscription schema is introduced. `GeoIpService` uses a local `dat/GeoLite2-Country.mmdb`, caches IP/domain lookups, and returns ISO country names and flag emoji. IP lookup itself is offline; resolving a hostname to an IP uses DNS. The RTT helper limits HTTP probes to 100 concurrent requests and marks failures or delays above 5 seconds offline. Its default probe measures direct reachability to Google’s HTTP 204 endpoint; callers must supply a per-profile probe URI to measure through a particular node. On the .NET 10 client, `ConnectToLowestLatencyProfileAsync` uses the native `ProfilesViewModel.SetDefaultServer` path to select and reload the winning profile.
+
+### Build and portable Windows package
+
+Build the official solution with the .NET 10 SDK. The isolated extension project can also be built for .NET 8 Windows:
+
+```powershell
+dotnet build .\v2rayN\v2rayN.sln -c Release
+dotnet build .\v2rayN\CustomExtensions\CustomExtensions.csproj -f net8.0-windows -c Release
+dotnet run --project .\v2rayN\CustomExtensions.Tests\CustomExtensions.Tests.csproj -c Release
+```
+
+To use `Publish-Portable.bat`, place the Windows Xray files in `bin/Xray/`, sing-box files in `bin/sing_box/`, and a licensed `GeoLite2-Country.mmdb` in `dat/`. The script publishes the upstream WPF app as a self-contained win-x64 single-file package and copies those assets into the output folder. These binaries and the GeoLite2 database are not committed. For tag builds, configure repository variables `XRAY_WINDOWS_ARCHIVE_URL`, `XRAY_WINDOWS_ARCHIVE_SHA256`, `SING_BOX_WINDOWS_ARCHIVE_URL`, and `SING_BOX_WINDOWS_ARCHIVE_SHA256` with GitHub HTTPS ZIP locations and their 64-digit SHA-256 digests; configure the `MAXMIND_LICENSE_KEY` secret for the licensed GeoLite2 download. The release workflow verifies archive hashes and fails with an explicit error when an asset is missing or invalid. Do not redistribute the MaxMind database without complying with its license.
+
+The runtime uses upstream's existing portable data-directory selection and does not force elevation in the manifest. It may fall back to LocalAppData when the application directory is not writable; this extension does not override that upstream behavior. TUN setup may request administrator approval through the existing v2rayN mechanism; an unconditional `requireAdministrator` manifest would unnecessarily elevate every launch.
+
+### Subscription-feed aggregation workflow
+
+`.github/workflows/update-sub.yml` contains the six-hour aggregator intended for `rostamimohammadamin8-dot/Free-VPN-Config-Pack-2026`; it is guarded to run only in that repository. Copy the workflow into that repository's `.github/workflows/` directory and set its `VPN_SOURCE_URLS` Actions variable to newline-separated HTTPS feed URLs. It validates proxy URI schemes, deduplicates and Base64-encodes the nodes, and commits `sub.txt` only when the result changes.
