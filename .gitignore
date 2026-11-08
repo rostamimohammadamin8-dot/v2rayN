@@ -405,6 +405,7 @@ FodyWeavers.xsd
 
 # Licensed GeoLite2 data and local portable runtime binaries
 /dat/*.mmdb
+/dat/portable-assets.json
 /bin/Xray/
 /bin/sing_box/
 /Output/

@@ -462,6 +462,8 @@ public class WebAuthEndpointTests
             builder.Services.AddSingleton(sessions);
             builder.Services.AddSingleton<EventHub>();
             builder.Services.AddSingleton<LogBuffer>();
+            builder.Services.AddSingleton<DiagnosticsService>();
+            builder.Services.AddSingleton<ServiceLib.Services.ProfileFailoverCoordinator>();
             builder.Services.AddSingleton<RuntimeOperationCoordinator>();
             builder.Services.AddSingleton<V2rayRuntime>();
             builder.Services.AddRateLimiter(WebAuthRateLimiting.Configure);

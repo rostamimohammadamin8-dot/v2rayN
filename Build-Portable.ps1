@@ -10,6 +10,7 @@ $repositoryRoot = $PSScriptRoot
 $outputDirectory = Join-Path $repositoryRoot 'Output'
 $stageDirectory = Join-Path $outputDirectory '_stage'
 $archivePath = Join-Path $outputDirectory 'v2rayN-Pro-Portable.zip'
+$manifestPath = Join-Path $outputDirectory 'release-manifest.json'
 $testProject = Join-Path $repositoryRoot 'v2rayN\CustomExtensions.Tests\CustomExtensions.Tests.csproj'
 $hostProject = Join-Path $repositoryRoot 'v2rayN\v2rayN\v2rayN.csproj'
 $sidecarProject = Join-Path $repositoryRoot 'v2rayN\CustomExtensions\CustomExtensions.csproj'
@@ -36,7 +37,12 @@ function Assert-CoreSourcesUnchanged {
             Where-Object {
                 $_ -and
                 $_ -notlike 'v2rayN/CustomExtensions/*' -and
-                $_ -notlike 'v2rayN/CustomExtensions.Tests/*'
+                $_ -notlike 'v2rayN/CustomExtensions.Tests/*' -and
+                $_ -notlike 'v2rayN/v2rayN.WebAPI/*' -and
+                $_ -notlike 'v2rayN/ServiceLib.Tests/*' -and
+                $_ -ne 'v2rayN/ServiceLib/Services/ProfileFailoverCoordinator.cs' -and
+                $_ -ne 'v2rayN/ServiceLib/Models/Configs/ProfileFailoverSettings.cs' -and
+                $_ -ne 'v2rayN/ServiceLib/Models/Configs/Config.cs'
             } |
             Sort-Object -Unique
     )
@@ -245,13 +251,15 @@ The existing v2rayN runtime stores its SQLite configuration under guiConfigs\gui
 
 '@
 if (Test-Path -LiteralPath (Join-Path $stageDirectory 'dat\GeoLite2-Country.mmdb') -PathType Leaf) {
+    $databaseEdition = if ($assetMetadata) { $assetMetadata.geoIp.edition } else { 'unknown edition' }
     $portableReadme += @'
 
-Country database attribution: IP Geolocation by DB-IP.com, IP to Country Lite, November 2026.
+Country database attribution: IP Geolocation by DB-IP.com, IP to Country Lite, __DBIP_EDITION__.
 Source: https://db-ip.com/db/download/ip-to-country-lite
 License: Creative Commons Attribution 4.0 International (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
 The MMDB is packaged under the runtime-compatible filename dat\GeoLite2-Country.mmdb; it is DB-IP data, not a MaxMind GeoLite2 database. The database is redistributed under CC BY 4.0.
 '@
+    $portableReadme = $portableReadme.Replace('__DBIP_EDITION__', $databaseEdition)
 }
 else {
     $portableReadme += @'
@@ -297,5 +305,51 @@ finally {
     $zip.Dispose()
 }
 
+$assetMetadataPath = Join-Path $repositoryRoot 'dat\portable-assets.json'
+$assetMetadata = if (Test-Path -LiteralPath $assetMetadataPath -PathType Leaf) {
+    Get-Content -Raw -LiteralPath $assetMetadataPath | ConvertFrom-Json
+}
+else {
+    $null
+}
+$geoIpPath = Join-Path $stageDirectory 'dat\GeoLite2-Country.mmdb'
+$geoIpMetadata = if ($assetMetadata -and (Test-Path -LiteralPath $geoIpPath -PathType Leaf)) {
+    $assetMetadata.geoIp
+}
+else {
+    $null
+}
+$manifest = [ordered]@{
+    schemaVersion = 1
+    source = [ordered]@{
+        repository = 'rostamimohammadamin8-dot/v2rayN'
+        commit = (& git -C $repositoryRoot rev-parse HEAD).Trim()
+        ref = if ($env:GITHUB_REF) { $env:GITHUB_REF } else { $null }
+    }
+    coreBundle = if ($assetMetadata) { $assetMetadata.coreBundle } else { $null }
+    geoIp = if ($geoIpMetadata) {
+        [ordered]@{
+            provider = $geoIpMetadata.provider
+            product = $geoIpMetadata.product
+            edition = $geoIpMetadata.edition
+            source = $geoIpMetadata.source
+            license = $geoIpMetadata.license
+            licenseUrl = $geoIpMetadata.licenseUrl
+            publisherSha1 = $geoIpMetadata.publisherSha1
+            sha256 = (Get-FileHash -LiteralPath $geoIpPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    else {
+        $null
+    }
+    archive = [ordered]@{
+        file = [IO.Path]::GetFileName($archivePath)
+        sha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+$manifest | ConvertTo-Json -Depth 12 |
+    Set-Content -LiteralPath $manifestPath -Encoding utf8
+
 Assert-CoreSourcesUnchanged
 Write-Output "Portable archive created and verified: $archivePath"
+Write-Output "Release manifest created: $manifestPath"

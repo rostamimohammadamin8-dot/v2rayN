@@ -140,6 +140,14 @@ public sealed record SpeedTestSettingsView(
     string? IPAPIUrl,
     string? UdpTestTarget);
 
+public sealed record ProfileFailoverSettingsInput(
+    bool Enabled,
+    int ConsecutiveFailureThreshold,
+    int FailureHysteresisSeconds,
+    int CooldownSeconds);
+
+public sealed record ProfileFailoverManualOverrideInput(DateTimeOffset? Until);
+
 public sealed record WebSettingsOptionsView(
     string[] LogLevels,
     string[] RootCertProviders,

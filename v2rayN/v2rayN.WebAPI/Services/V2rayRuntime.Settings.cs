@@ -437,6 +437,33 @@ public sealed partial class V2rayRuntime
         return OperationView.Ok(ApiMessageKeys.SpeedTestSettingsSaved);
     }
 
+    public ProfileFailoverSettings GetProfileFailoverSettings() =>
+        Config.ProfileFailoverSettings ??= new ServiceLib.Models.Configs.ProfileFailoverSettings();
+
+    public async Task<OperationView> UpdateProfileFailoverSettingsAsync(ProfileFailoverSettingsInput input)
+    {
+        if (input.ConsecutiveFailureThreshold is < 1 or > 20
+            || input.FailureHysteresisSeconds is < 1 or > 3600
+            || input.CooldownSeconds is < 1 or > 86400)
+        {
+            return OperationView.Fail("profile_failover_settings_invalid", ApiMessageKeys.CommonInvalidInput);
+        }
+
+        await _mutations.RunAsync(async () =>
+        {
+            Config.ProfileFailoverSettings = new ServiceLib.Models.Configs.ProfileFailoverSettings
+            {
+                Enabled = input.Enabled,
+                ConsecutiveFailureThreshold = input.ConsecutiveFailureThreshold,
+                FailureHysteresisSeconds = input.FailureHysteresisSeconds,
+                CooldownSeconds = input.CooldownSeconds,
+            };
+            await EnsureConfigSaveSucceededAsync(() => ConfigHandler.SaveConfig(Config));
+        });
+        _events.Publish("settings-changed", new { section = "failover", restartRequired = false });
+        return OperationView.Ok(ApiMessageKeys.CommonSaved);
+    }
+
     public async Task<OperationView> UpdateCoreTypeMappingsAsync(IEnumerable<CoreTypeMapping> mappings)
     {
         var requestedMappings = mappings.ToArray();

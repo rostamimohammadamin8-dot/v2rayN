@@ -131,6 +131,31 @@ try {
     New-Item -ItemType Directory -Force -Path $databaseDirectory | Out-Null
     Move-Item -LiteralPath $databaseTemp -Destination (Join-Path $databaseDirectory 'GeoLite2-Country.mmdb') -Force
 
+    $assetMetadata = [ordered]@{
+        coreBundle = [ordered]@{
+            repository = '2dust/v2rayN-core-bin'
+            commit = $bundleCommit
+            gitBlobSha1 = $bundleGitBlobSha1
+            executables = [ordered]@{
+                xray = (Get-FileHash -LiteralPath (Join-Path $repositoryRoot 'bin\Xray\xray.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+                singBox = (Get-FileHash -LiteralPath (Join-Path $repositoryRoot 'bin\sing_box\sing-box.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+        }
+        geoIp = [ordered]@{
+            provider = 'DB-IP'
+            product = 'IP to Country Lite'
+            edition = $dbIpRelease
+            source = $databaseUrl
+            license = 'CC BY 4.0'
+            licenseUrl = 'https://creativecommons.org/licenses/by/4.0/'
+            publisherSha1 = $dbIpMmdbSha1
+            sha256 = (Get-FileHash -LiteralPath (Join-Path $databaseDirectory 'GeoLite2-Country.mmdb') -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    $assetMetadataPath = Join-Path $databaseDirectory 'portable-assets.json'
+    $assetMetadata | ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath $assetMetadataPath -Encoding utf8
+
     Write-Output "Pinned core bundle Git blob SHA-1: $actualBundleHash"
     Write-Output "DB-IP Country Lite $dbIpRelease published SHA-1: $actualDatabaseHash"
     Write-Output "Xray SHA-256: $((Get-FileHash -LiteralPath (Join-Path $repositoryRoot 'bin\Xray\xray.exe') -Algorithm SHA256).Hash)"

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ServiceLib;
 using ServiceLib.Common;
+using ServiceLib.Services;
 using v2rayN.WebAPI.Api;
 using v2rayN.WebAPI.Configuration;
 using v2rayN.WebAPI.Contracts;
@@ -231,6 +232,26 @@ internal static class Program
         builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
         builder.Services.AddSingleton<EventHub>();
         builder.Services.AddSingleton<LogBuffer>();
+        builder.Services.AddSingleton<DiagnosticsService>();
+        builder.Services.AddSingleton<ProfileFailoverCoordinator>(services =>
+        {
+            var coordinator = new ProfileFailoverCoordinator();
+            var events = services.GetRequiredService<EventHub>();
+            var logs = services.GetRequiredService<LogBuffer>();
+            coordinator.RouteSwitched += switched =>
+            {
+                var notification = new
+                {
+                    previousProfileId = switched.PreviousProfileId,
+                    selectedProfileId = switched.SelectedProfileId,
+                    latencyMilliseconds = switched.LatencyMilliseconds,
+                    switchedAt = switched.SwitchedAt,
+                };
+                logs.Add("failover", $"Automatic profile switch completed with {switched.LatencyMilliseconds:0} ms probe latency.");
+                events.Publish("profile-failover", notification);
+            };
+            return coordinator;
+        });
         builder.Services.AddSingleton<RuntimeOperationCoordinator>();
         builder.Services.AddSingleton<V2rayRuntime>();
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = RuntimeShutdownBudgets.HostShutdown);

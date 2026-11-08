@@ -1,0 +1,38 @@
+name: Refresh portable asset pins
+
+on:
+  schedule:
+    - cron: "23 5 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Refresh verified upstream pins
+        shell: pwsh
+        run: .\Update-PortableAssetPins.ps1
+
+      - name: Create review-only pull request
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
+        with:
+          branch: automation/portable-asset-refresh
+          delete-branch: true
+          title: Refresh pinned portable assets
+          commit-message: Refresh pinned portable assets
+          body: |
+            Refreshes the pinned Xray/sing-box bundle and DB-IP Country Lite edition after verifying the upstream bundle contents and publisher checksum.
+
+            This pull request is review-only. It is not automatically merged or published.
+          add-paths: Provision-PortableAssets.ps1

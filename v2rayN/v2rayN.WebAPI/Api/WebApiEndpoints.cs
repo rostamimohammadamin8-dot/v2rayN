@@ -1,5 +1,6 @@
 using ServiceLib.Enums;
 using ServiceLib.Models.Entities;
+using ServiceLib.Services;
 using Microsoft.AspNetCore.Mvc;
 using v2rayN.WebAPI.Contracts;
 using v2rayN.WebAPI.Security;
@@ -26,6 +27,15 @@ public static class WebApiEndpoints
             ApiReplies.Ok(runtime.GetRecentLogs(limit ?? 200, filter), "logs.loaded"));
         app.MapGet("/api/logs/page", (int? page, int? pageSize, string? filter, V2rayRuntime runtime) =>
             ApiReplies.Ok(runtime.GetRecentLogsPage(page ?? 1, pageSize ?? 100, filter), "logs.loaded"));
+        app.MapGet("/api/diagnostics", async (V2rayRuntime runtime, DiagnosticsService diagnostics) =>
+        {
+            var status = await runtime.GetStatusAsync();
+            var archive = diagnostics.CreateArchive(
+                status,
+                await runtime.GetRunningOperationsAsync(),
+                runtime.GetRecentLogs(500));
+            return Results.File(archive, "application/zip", "v2rayN-diagnostics.zip");
+        });
         app.MapDelete("/api/logs", (V2rayRuntime runtime) =>
         {
             var generation = runtime.ClearLogs();
@@ -149,6 +159,27 @@ public static class WebApiEndpoints
             ApiReplies.Operation(await runtime.UpdateAppSettingsAsync(input)));
         app.MapPut("/api/settings/speedtest", async (SpeedTestSettingsInput input, V2rayRuntime runtime) =>
             ApiReplies.Operation(await runtime.UpdateSpeedTestSettingsAsync(input)));
+        app.MapGet("/api/settings/failover", (V2rayRuntime runtime) =>
+            ApiReplies.Ok(runtime.GetProfileFailoverSettings(), "settings.loaded"));
+        app.MapPut("/api/settings/failover", async (ProfileFailoverSettingsInput input, V2rayRuntime runtime) =>
+            ApiReplies.Operation(await runtime.UpdateProfileFailoverSettingsAsync(input)));
+        app.MapPut("/api/settings/failover/manual-override", (ProfileFailoverManualOverrideInput input, ProfileFailoverCoordinator coordinator) =>
+        {
+            if (input.Until is { } until)
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (until <= now || until > now.AddHours(24))
+                {
+                    return ApiReplies.Operation(OperationView.Fail("profile_failover_override_invalid", ApiMessageKeys.CommonInvalidInput));
+                }
+                coordinator.SetManualOverride(until);
+            }
+            else
+            {
+                coordinator.ClearManualOverride();
+            }
+            return ApiReplies.Ok(new { until = input.Until }, "settings.saved");
+        });
         app.MapPut("/api/settings/core-types", async (CoreTypeMappingsInput input, V2rayRuntime runtime) =>
             ApiReplies.Operation(await runtime.UpdateCoreTypeMappingsAsync(input.Mappings)));
         app.MapPut("/api/settings/routing", async (RoutingSettingsInput input, V2rayRuntime runtime) =>
